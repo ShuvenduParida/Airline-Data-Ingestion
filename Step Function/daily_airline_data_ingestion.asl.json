@@ -1,0 +1,108 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "StartCrawler",
+  "States": {
+    "StartCrawler": {
+      "Type": "Task",
+      "Parameters": {
+        "Name": "daily_raw_data_crawler"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+      "Next": "GetCrawler"
+    },
+    "GetCrawler": {
+      "Type": "Task",
+      "Parameters": {
+        "Name": "daily_raw_data_crawler"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:glue:getCrawler",
+      "Next": "crawler status check"
+    },
+    "crawler status check": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Next": "Wait",
+          "Variable": "$.Crawler.State",
+          "StringMatches": "RUNNING"
+        }
+      ],
+      "Default": "Glue StartJobRun"
+    },
+    "Wait": {
+      "Type": "Wait",
+      "Seconds": 10,
+      "Next": "GetCrawler"
+    },
+    "Glue StartJobRun": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun",
+      "Parameters": {
+        "JobName": "airline_data_ingestion"
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
+          "Next": "failed notification"
+        }
+      ],
+      "Next": "GetJobRun"
+    },
+    "GetJobRun": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:glue:getJobRun",
+      "Parameters": {
+        "JobName": "airline_data_ingestion",
+        "RunId.$": "$.JobRunId"
+      },
+      "ResultSelector": {
+        "JobRunId.$": "$.JobRun.Id",
+        "JobRunState.$": "$.JobRun.JobRunState"
+      },
+      "ResultPath": "$.JobStatus",
+      "Next": "Glue job status check"
+    },
+    "Glue job status check": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Next": "success notification",
+          "Variable": "$.JobStatus.JobRunState",
+          "StringMatches": "SUCCEEDED"
+        },
+        {
+          "Next": "Wait for finish the Job",
+          "Variable": "$.JobStatus.JobRunState",
+          "StringMatches": "RUNNING"
+        }
+      ],
+      "Default": "failed notification"
+    },
+    "success notification": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:ap-south-1:533266983075:topic_message",
+        "Message": "Glue job excecution successful"
+      },
+      "End": true
+    },
+    "failed notification": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:ap-south-1:533266983075:topic_message",
+        "Message": "Glue job excecution faild"
+      },
+      "End": true
+    },
+    "Wait for finish the Job": {
+      "Type": "Wait",
+      "Seconds": 20,
+      "Next": "GetJobRun"
+    }
+  },
+  "QueryLanguage": "JSONPath"
+}
